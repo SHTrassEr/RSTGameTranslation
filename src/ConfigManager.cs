@@ -122,6 +122,10 @@ namespace RSTGameTranslation
         public const string SHOW_TRANSLATION_ENABLED = "show_translation_enabled";
         public const string CHAR_LEVEL = "char_level";
         public const string IGNORE_PHRASES = "ignore_phrases";
+        public const string TRANSLATION_CACHE_ENABLED = "translation_cache_enabled";
+        public const string TRANSLATION_CACHE_MAX_LENGTH = "translation_cache_max_length";
+        public const string TRANSLATION_CACHE_MAX_ENTRIES = "translation_cache_max_entries";
+        public const string TRANSLATION_CACHE_TTL_MINUTES = "translation_cache_ttl_minutes";
         public const string WINDOWS_OCR_INTEGRATION = "windows_ocr_integration";
         public const string AUTO_OCR = "auto_ocr";
         public const string MANGA_MODE = "manga_mode";
@@ -554,6 +558,10 @@ namespace RSTGameTranslation
             _configValues[SHOW_TRANSLATION_ENABLED] = "true";
             _configValues[CHAR_LEVEL] = "false";
             _configValues[IGNORE_PHRASES] = "";
+            _configValues[TRANSLATION_CACHE_ENABLED] = "false";
+            _configValues[TRANSLATION_CACHE_MAX_LENGTH] = "0";
+            _configValues[TRANSLATION_CACHE_MAX_ENTRIES] = "0";
+            _configValues[TRANSLATION_CACHE_TTL_MINUTES] = "0";
             _configValues[TEXTSIMILAR_THRESHOLD] = (0.9).ToString(CultureInfo.InvariantCulture);
             _configValues[OVERLAY_BACKGROUND_COLOR] = "#FF000000";
             _configValues[OVERLAY_TEXT_COLOR] = "#FFFFFFFF";
@@ -2458,6 +2466,57 @@ namespace RSTGameTranslation
             _configValues[MANGA_MODE] = enabled.ToString().ToLower();
             SaveConfig();
             Console.WriteLine($"Manga mode enabled: {enabled}");
+        }
+
+        public bool IsTranslationCacheEnabled()
+        {
+            string value = GetValue(TRANSLATION_CACHE_ENABLED, "false");
+            return value.ToLower() == "true";
+        }
+
+        public void SetTranslationCacheEnabled(bool enabled)
+        {
+            _configValues[TRANSLATION_CACHE_ENABLED] = enabled.ToString().ToLower();
+            SaveConfig();
+        }
+
+        public int GetTranslationCacheMaxLength()
+        {
+            string value = GetValue(TRANSLATION_CACHE_MAX_LENGTH, "0");
+            if (int.TryParse(value, out int result)) return result;
+            return 0;
+        }
+
+        public void SetTranslationCacheMaxLength(int length)
+        {
+            _configValues[TRANSLATION_CACHE_MAX_LENGTH] = length.ToString();
+            SaveConfig();
+        }
+
+        public int GetTranslationCacheMaxEntries()
+        {
+            string value = GetValue(TRANSLATION_CACHE_MAX_ENTRIES, "0");
+            if (int.TryParse(value, out int result)) return result;
+            return 0;
+        }
+
+        public void SetTranslationCacheMaxEntries(int maxEntries)
+        {
+            _configValues[TRANSLATION_CACHE_MAX_ENTRIES] = maxEntries.ToString();
+            SaveConfig();
+        }
+
+        public int GetTranslationCacheTtlMinutes()
+        {
+            string value = GetValue(TRANSLATION_CACHE_TTL_MINUTES, "0");
+            if (int.TryParse(value, out int result)) return result;
+            return 0;
+        }
+
+        public void SetTranslationCacheTtlMinutes(int minutes)
+        {
+            _configValues[TRANSLATION_CACHE_TTL_MINUTES] = minutes.ToString();
+            SaveConfig();
         }
 
         // Get/Set TTS service

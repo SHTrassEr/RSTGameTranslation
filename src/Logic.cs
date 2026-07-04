@@ -38,6 +38,8 @@ namespace RSTGameTranslation
         private string _lastOcrHash = string.Empty;
         private string _lastTextContent = string.Empty;
 
+        private TranslationCache _translationCache = new();
+
         // Cached stop words to avoid re-allocating large HashSets every OCR frame
         private string _cachedStopWordsLanguage = string.Empty;
         private HashSet<string> _cachedStopWords = new HashSet<string>();
@@ -305,6 +307,7 @@ namespace RSTGameTranslation
         {
             _lastOcrHash = "";
             _lastChangeTime = DateTime.Now;
+            _translationCache.Clear();
         }
 
         /// <summary>
@@ -349,10 +352,12 @@ namespace RSTGameTranslation
 
 
         // Process Google Translate JSON response
-        private void ProcessGoogleTranslateJson(JsonElement rootElement, bool addToChatBox = true)
+        private void ProcessGoogleTranslateJson(JsonElement rootElement, bool addToChatBox = true, List<TextObject>? targetList = null)
         {
             try
             {
+                var list = targetList ?? _textObjects;
+
                 Console.WriteLine("Processing Google Translate response");
 
                 if (rootElement.TryGetProperty("translations", out JsonElement translationsArray) &&
@@ -388,45 +393,32 @@ namespace RSTGameTranslation
                                     // Split the translated text using the separator
                                     string[] translatedParts = translatedText.Split("##|||##");
 
-                                    // Assign each part to the corresponding text object
-                                    for (int j = 0; j < Math.Min(translatedParts.Length, _textObjects.Count); j++)
+                                    for (int j = 0; j < Math.Min(translatedParts.Length, list.Count); j++)
                                     {
-                                        // Clean up the translated text - remove any remaining separators that might have been part of the translation
-                                        // Use regex to handle all variations of the separator with different spacing
                                         string cleanTranslatedText = System.Text.RegularExpressions.Regex.Replace(
                                             translatedParts[j],
                                             @"\#{2}\s*\|\|\|\s*\#{2}",
                                             ""
                                         );
-                                        // Also clean up any potential fragments
                                         cleanTranslatedText = cleanTranslatedText.Replace("|||", "");
                                         cleanTranslatedText = cleanTranslatedText.Replace("##", "");
 
-                                        // Apply RTL specific handling if needed
                                         if (isRtlLanguage)
                                         {
-                                            // Set flow direction for RTL languages
-                                            _textObjects[j].FlowDirection = FlowDirection.RightToLeft;
-
-                                            // Optionally add Unicode RLM (Right-to-Left Mark) if needed
+                                            list[j].FlowDirection = FlowDirection.RightToLeft;
                                             if (!cleanTranslatedText.StartsWith("\u200F"))
-                                            {
                                                 cleanTranslatedText = "\u200F" + cleanTranslatedText;
-                                            }
                                         }
                                         else
                                         {
-                                            // Ensure LTR for non-RTL languages
-                                            _textObjects[j].FlowDirection = FlowDirection.LeftToRight;
+                                            list[j].FlowDirection = FlowDirection.LeftToRight;
                                         }
 
-                                        // Update the text object with the cleaned translated text
-                                        _textObjects[j].TextTranslated = cleanTranslatedText;
-                                        _textObjects[j].UpdateUIElement();
+                                        list[j].TextTranslated = cleanTranslatedText;
+                                        list[j].UpdateUIElement();
                                         Console.WriteLine($"Updated text object at index {j} with translation from Google Translate");
                                     }
 
-                                    // We've processed the combined text block, so we can break out of the loop
                                     break;
                                 }
                                 else
@@ -2305,10 +2297,12 @@ namespace RSTGameTranslation
         }
 
         //! Process structured JSON translation from ChatGPT or other services
-        private void ProcessStructuredJsonTranslation(JsonElement translatedRoot, bool addToChatBox = true)
+        private void ProcessStructuredJsonTranslation(JsonElement translatedRoot, bool addToChatBox = true, List<TextObject>? targetList = null)
         {
             try
             {
+                var list = targetList ?? _textObjects;
+
                 Console.WriteLine("Processing structured JSON translation");
                 // Check if we have text_blocks array in the translated JSON
                 if (translatedRoot.TryGetProperty("text_blocks", out JsonElement textBlocksElement) &&
@@ -2352,7 +2346,7 @@ namespace RSTGameTranslation
                                     string[] translatedParts = translatedText.Split("##|||##");
 
                                     // Assign each part to the corresponding text object
-                                    for (int j = 0; j < Math.Min(translatedParts.Length, _textObjects.Count); j++)
+                                    for (int j = 0; j < Math.Min(translatedParts.Length, list.Count); j++)
                                     {
                                         // Clean up the translated text - remove any remaining separators that might have been part of the translation
                                         // Use regex to handle all variations of the separator with different spacing
@@ -2369,7 +2363,7 @@ namespace RSTGameTranslation
                                         if (isRtlLanguage)
                                         {
                                             // Set flow direction for RTL languages
-                                            _textObjects[j].FlowDirection = FlowDirection.RightToLeft;
+                                            list[j].FlowDirection = FlowDirection.RightToLeft;
 
                                             // Optionally add Unicode RLM (Right-to-Left Mark) if needed
                                             if (!cleanTranslatedText.StartsWith("\u200F"))
@@ -2380,12 +2374,12 @@ namespace RSTGameTranslation
                                         else
                                         {
                                             // Ensure LTR for non-RTL languages
-                                            _textObjects[j].FlowDirection = FlowDirection.LeftToRight;
+                                            list[j].FlowDirection = FlowDirection.LeftToRight;
                                         }
 
                                         // Update the text object with the cleaned translated text
-                                        _textObjects[j].TextTranslated = cleanTranslatedText;
-                                        _textObjects[j].UpdateUIElement();
+                                        list[j].TextTranslated = cleanTranslatedText;
+                                        list[j].UpdateUIElement();
                                         Console.WriteLine($"Updated text object at index {j} with translation from Google Translate");
                                     }
 
@@ -2479,7 +2473,7 @@ namespace RSTGameTranslation
         }
 
         //!Process the finished translation into text blocks and the chatbox
-        void ProcessTranslatedJSON(string translationResponse, bool addToChatBox = true)
+        void ProcessTranslatedJSON(string translationResponse, bool addToChatBox = true, List<TextObject>? targetList = null)
         {
             try
             {
@@ -2499,7 +2493,7 @@ namespace RSTGameTranslation
                 {
                     Console.WriteLine("Translation response with 'translations' format detected (Google Translate / Yandex / compatible)");
                     using JsonDocument doc = JsonDocument.Parse(innerContent);
-                    ProcessGoogleTranslateJson(doc.RootElement, addToChatBox);
+                    ProcessGoogleTranslateJson(doc.RootElement, addToChatBox, targetList);
                     return;
                 }
 
@@ -2507,7 +2501,7 @@ namespace RSTGameTranslation
                 try
                 {
                     using JsonDocument translatedDoc = JsonDocument.Parse(innerContent);
-                    ProcessStructuredJsonTranslation(translatedDoc.RootElement, addToChatBox);
+                    ProcessStructuredJsonTranslation(translatedDoc.RootElement, addToChatBox, targetList);
                 }
                 catch (JsonException ex)
                 {
@@ -2630,8 +2624,28 @@ namespace RSTGameTranslation
 
                 if (mangaModeEnabled)
                 {
+                    int cachedCount = 0;
                     foreach (var textObject in _textObjects)
                     {
+                        if (_translationCache.TryGet(textObject.Text, out var cached))
+                        {
+                            textObject.TextTranslated = cached;
+                            cachedCount++;
+                        }
+                    }
+
+                    if (cachedCount == _textObjects.Count)
+                    {
+                        AddTranslatedTextObjectsToChatBox();
+                        OnFinishedThings(true);
+                        return;
+                    }
+
+                    foreach (var textObject in _textObjects)
+                    {
+                        if (!string.IsNullOrEmpty(textObject.TextTranslated))
+                            continue;
+
                         var singleBlockPayload = new List<object>
                         {
                             new
@@ -2653,6 +2667,9 @@ namespace RSTGameTranslation
 
                         ProcessTranslatedJSON(translationResponse, false);
                         hadSuccessfulTranslation = true;
+
+                        if (!string.IsNullOrEmpty(textObject.TextTranslated))
+                            _translationCache.Store(textObject.Text, textObject.TextTranslated);
                     }
 
                     if (!hadSuccessfulTranslation)
@@ -2665,7 +2682,23 @@ namespace RSTGameTranslation
                 }
                 else
                 {
-                    var combinedText = string.Join("##|||##", _textObjects.Select(obj => obj.Text));
+                    var uncached = new List<TextObject>();
+                    foreach (var textObject in _textObjects)
+                    {
+                        if (_translationCache.TryGet(textObject.Text, out var cached))
+                            textObject.TextTranslated = cached;
+                        else
+                            uncached.Add(textObject);
+                    }
+
+                    if (uncached.Count == 0)
+                    {
+                        AddTranslatedTextObjectsToChatBox();
+                        OnFinishedThings(true);
+                        return;
+                    }
+
+                    var combinedText = string.Join("##|||##", uncached.Select(obj => obj.Text));
                     var textsToTranslate = new List<object>
                     {
                         new
@@ -2687,7 +2720,15 @@ namespace RSTGameTranslation
                         return;
                     }
 
-                    ProcessTranslatedJSON(translationResponse);
+                    ProcessTranslatedJSON(translationResponse, addToChatBox: false, targetList: uncached);
+                    AddTranslatedTextObjectsToChatBox();
+                    hadSuccessfulTranslation = true;
+
+                    foreach (var textObject in uncached)
+                    {
+                        if (!string.IsNullOrEmpty(textObject.TextTranslated))
+                            _translationCache.Store(textObject.Text, textObject.TextTranslated);
+                    }
                 }
 
                 _translationStopwatch.Stop();
