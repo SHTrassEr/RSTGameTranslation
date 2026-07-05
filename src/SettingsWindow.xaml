@@ -1465,6 +1465,52 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+            <!-- Translation Cache Tab -->
+            <TabItem Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tab_TranslationCache]}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="10">
+                        <GroupBox Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Grp_TranslationCache]}" Margin="0,0,0,15" Padding="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <CheckBox x:Name="translationCacheEnabledCheckBox"
+                                          Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Chk_EnableTranslationCache]}"
+                                          Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                                          VerticalAlignment="Center" Margin="0,5" IsChecked="False"
+                                          Checked="TranslationCacheSettings_Changed" Unchecked="TranslationCacheSettings_Changed"/>
+
+                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Lbl_CacheMaxLength]}"
+                                           Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,8,10,0"/>
+                                <TextBox x:Name="cacheMaxLengthTextBox" Grid.Row="1" Grid.Column="1"
+                                         Margin="0,8,0,0" Width="80" HorizontalAlignment="Left"
+                                         TextChanged="TranslationCacheSettings_Changed"/>
+
+                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Lbl_CacheMaxEntries]}"
+                                           Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="0,8,10,0"/>
+                                <TextBox x:Name="cacheMaxEntriesTextBox" Grid.Row="2" Grid.Column="1"
+                                         Margin="0,8,0,0" Width="80" HorizontalAlignment="Left"
+                                         TextChanged="TranslationCacheSettings_Changed"/>
+
+                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Lbl_CacheTtlMinutes]}"
+                                           Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Margin="0,8,10,0"/>
+                                <TextBox x:Name="cacheTtlMinutesTextBox" Grid.Row="3" Grid.Column="1"
+                                         Margin="0,8,0,0" Width="80" HorizontalAlignment="Left"
+                                         TextChanged="TranslationCacheSettings_Changed"/>
+                            </Grid>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
             
             <!-- Text-to-Speech Tab -->
             <TabItem Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tab_TTS]}">

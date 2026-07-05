@@ -1216,6 +1216,7 @@ namespace RSTGameTranslation
 
             // Load ignore phrases
             LoadIgnorePhrases();
+            LoadTranslationCacheSettings();
 
             // Load exclude regions
             LoadExcludeRegions();
@@ -4449,6 +4450,46 @@ namespace RSTGameTranslation
             {
                 Console.WriteLine($"Error updating ignore phrase: {ex.Message}");
             }
+        }
+
+        private void LoadTranslationCacheSettings()
+        {
+            try
+            {
+                translationCacheEnabledCheckBox.IsChecked = ConfigManager.Instance.IsTranslationCacheEnabled();
+                cacheMaxLengthTextBox.Text = ConfigManager.Instance.GetTranslationCacheMaxLength().ToString();
+                cacheMaxEntriesTextBox.Text = ConfigManager.Instance.GetTranslationCacheMaxEntries().ToString();
+                cacheTtlMinutesTextBox.Text = ConfigManager.Instance.GetTranslationCacheTtlMinutes().ToString();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading translation cache settings: {ex.Message}");
+            }
+        }
+
+        private void SaveTranslationCacheSettings()
+        {
+            try
+            {
+                if (_isInitializing)
+                    return;
+                ConfigManager.Instance.SetTranslationCacheEnabled(translationCacheEnabledCheckBox.IsChecked ?? true);
+                if (int.TryParse(cacheMaxLengthTextBox.Text, out int maxLength))
+                    ConfigManager.Instance.SetTranslationCacheMaxLength(maxLength);
+                if (int.TryParse(cacheMaxEntriesTextBox.Text, out int maxEntries))
+                    ConfigManager.Instance.SetTranslationCacheMaxEntries(maxEntries);
+                if (int.TryParse(cacheTtlMinutesTextBox.Text, out int ttl))
+                    ConfigManager.Instance.SetTranslationCacheTtlMinutes(ttl);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving translation cache settings: {ex.Message}");
+            }
+        }
+
+        private void TranslationCacheSettings_Changed(object sender, RoutedEventArgs e)
+        {
+            SaveTranslationCacheSettings();
         }
 
         // Load exclude regions from ConfigManager
