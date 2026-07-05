@@ -57,6 +57,7 @@
   "Lbl_MinTextFragmentSize": "Smallest text fragment:",
   "Lbl_MinLetterConfidence": "Min letter confidence:",
   "Lbl_MinLineConfidence": "Min line confidence:",
+  "Lbl_LineSpacingFactor": "Line spacing factor:",
   "Lbl_MultiSelection": "Multi Selection Area",
   "Lbl_LeaveOnscreen": "Leave translation onscreen:",
   "Lbl_AutoTranslate": "Auto Translate:",

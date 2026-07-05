@@ -113,6 +113,7 @@ namespace RSTGameTranslation
         public const string MIN_TEXT_FRAGMENT_SIZE = "min_text_fragment_size";
         public const string BLOCK_DETECTION_SCALE = "block_detection_scale";
         public const string BLOCK_DETECTION_SETTLE_TIME = "block_detection_settle_time";
+        public const string LINE_SPACING_FACTOR = "line_spacing_factor";
         public const string KEEP_TRANSLATED_TEXT_UNTIL_REPLACED = "keep_translated_text_until_replaced";
         public const string LEAVE_TRANSLATION_ONSCREEN = "leave_translation_onscreen";
         public const string MIN_LETTER_CONFIDENCE = "min_letter_confidence";
@@ -549,6 +550,7 @@ namespace RSTGameTranslation
             _configValues[GEMINI_MODEL] = "gemini-2.5-flash-lite";
             _configValues[BLOCK_DETECTION_SCALE] = (3.00).ToString(CultureInfo.InvariantCulture);
             _configValues[BLOCK_DETECTION_SETTLE_TIME] = (0.2).ToString(CultureInfo.InvariantCulture);
+            _configValues[LINE_SPACING_FACTOR] = (0.63).ToString(CultureInfo.InvariantCulture);
             _configValues[KEEP_TRANSLATED_TEXT_UNTIL_REPLACED] = "true";
             _configValues[LEAVE_TRANSLATION_ONSCREEN] = "true";
             _configValues[MIN_LETTER_CONFIDENCE] = (0.1).ToString(CultureInfo.InvariantCulture);
@@ -3055,6 +3057,24 @@ namespace RSTGameTranslation
                 _configValues[BLOCK_DETECTION_SETTLE_TIME] = seconds.ToString("F2", CultureInfo.InvariantCulture);
                 SaveConfig();
                 Console.WriteLine($"Block detection settle time set to: {seconds:F2} seconds");
+            }
+        }
+
+        public double GetLineSpacingFactor()
+        {
+            string value = GetValue(LINE_SPACING_FACTOR, "0.63");
+            if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double factor) && factor > 0)
+                return factor;
+            return 0.63;
+        }
+
+        public void SetLineSpacingFactor(double factor)
+        {
+            if (factor > 0)
+            {
+                _configValues[LINE_SPACING_FACTOR] = factor.ToString("F2", CultureInfo.InvariantCulture);
+                SaveConfig();
+                Console.WriteLine($"Line spacing factor set to: {factor:F2}");
             }
         }
 

@@ -64,6 +64,7 @@
   "Lbl_MinTextFragmentSize": "최소 텍스트 조각 크기:",
   "Lbl_MinLetterConfidence": "최소 문자 신뢰도:",
   "Lbl_MinLineConfidence": "최소 라인 신뢰도:",
+  "Lbl_LineSpacingFactor": "줄 간격 계수:",
   "Lbl_MultiSelection": "다중 영역 선택",
   "Lbl_LeaveOnscreen": "번역을 화면에 유지:",
   "Lbl_AutoTranslate": "자동 번역:",

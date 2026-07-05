@@ -64,6 +64,7 @@
   "Lbl_MinTextFragmentSize": "Мин. размер фрагмента:",
   "Lbl_MinLetterConfidence": "Мин. уверенность (буква):",
   "Lbl_MinLineConfidence": "Мин. уверенность (строка):",
+  "Lbl_LineSpacingFactor": "Коэфф. межстрочного интервала:",
   "Lbl_MultiSelection": "Мульти-выбор области",
   "Lbl_LeaveOnscreen": "Оставить перевод на экране:",
   "Lbl_AutoTranslate": "Авто перевод:",

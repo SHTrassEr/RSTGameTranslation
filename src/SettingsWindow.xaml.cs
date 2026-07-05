@@ -876,6 +876,7 @@ namespace RSTGameTranslation
             minTextFragmentSizeTextBox.LostFocus -= MinTextFragmentSizeTextBox_LostFocus;
             minLetterConfidenceTextBox.LostFocus -= MinLetterConfidenceTextBox_LostFocus;
             minLineConfidenceTextBox.LostFocus -= MinLineConfidenceTextBox_LostFocus;
+            lineSpacingFactorTextBox.LostFocus -= LineSpacingFactorTextBox_LostFocus;
             blockDetectionPowerTextBox.LostFocus -= BlockDetectionPowerTextBox_LostFocus;
             settleTimeTextBox.LostFocus -= SettleTimeTextBox_LostFocus;
 
@@ -887,6 +888,7 @@ namespace RSTGameTranslation
             minTextFragmentSizeTextBox.Text = ConfigManager.Instance.GetMinTextFragmentSize().ToString();
             minLetterConfidenceTextBox.Text = ConfigManager.Instance.GetMinLetterConfidence().ToString(CultureInfo.InvariantCulture);
             minLineConfidenceTextBox.Text = ConfigManager.Instance.GetMinLineConfidence().ToString(CultureInfo.InvariantCulture);
+            lineSpacingFactorTextBox.Text = ConfigManager.Instance.GetLineSpacingFactor().ToString(CultureInfo.InvariantCulture);
 
             // Reattach focus event handlers
             maxContextPiecesTextBox.LostFocus += MaxContextPiecesTextBox_LostFocus;
@@ -896,6 +898,7 @@ namespace RSTGameTranslation
             minTextFragmentSizeTextBox.LostFocus += MinTextFragmentSizeTextBox_LostFocus;
             minLetterConfidenceTextBox.LostFocus += MinLetterConfidenceTextBox_LostFocus;
             minLineConfidenceTextBox.LostFocus += MinLineConfidenceTextBox_LostFocus;
+            lineSpacingFactorTextBox.LostFocus += LineSpacingFactorTextBox_LostFocus;
 
             textSimilarThresholdTextBox.LostFocus += TextSimilarThresholdTextBox_LostFocus;
             // Load source language either from config or MainWindow as fallback
@@ -3855,6 +3858,29 @@ namespace RSTGameTranslation
             catch (Exception ex)
             {
                 Console.WriteLine($"Error updating minimum line confidence: {ex.Message}");
+            }
+        }
+
+        private void LineSpacingFactorTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_isInitializing)
+                    return;
+
+                if (double.TryParse(lineSpacingFactorTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double factor) && factor > 0)
+                {
+                    ConfigManager.Instance.SetLineSpacingFactor(factor);
+                    Console.WriteLine($"Line spacing factor set to: {factor:F2}");
+                }
+                else
+                {
+                    lineSpacingFactorTextBox.Text = ConfigManager.Instance.GetLineSpacingFactor().ToString(CultureInfo.InvariantCulture);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error updating line spacing factor: {ex.Message}");
             }
         }
 

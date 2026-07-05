@@ -64,6 +64,7 @@
   "Lbl_MinTextFragmentSize": "最小文本片段：",
   "Lbl_MinLetterConfidence": "最小字符置信度：",
   "Lbl_MinLineConfidence": "最小行置信度：",
+  "Lbl_LineSpacingFactor": "行距系数：",
   "Lbl_MultiSelection": "多区域选择",
   "Lbl_LeaveOnscreen": "保留翻译在屏幕上：",
   "Lbl_AutoTranslate": "自动翻译：",

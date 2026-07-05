@@ -64,6 +64,7 @@
   "Lbl_MinTextFragmentSize": "最小テキスト断片サイズ:",
   "Lbl_MinLetterConfidence": "最小文字信頼度:",
   "Lbl_MinLineConfidence": "最小行信頼度:",
+  "Lbl_LineSpacingFactor": "行間係数:",
   "Lbl_MultiSelection": "複数エリア選択",
   "Lbl_LeaveOnscreen": "翻訳を画面に残す:",
   "Lbl_AutoTranslate": "自動翻訳:",
