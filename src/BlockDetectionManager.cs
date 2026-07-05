@@ -815,8 +815,8 @@ namespace RSTGameTranslation
                         indent = line.Bounds.Y - lastLine.Bounds.Y;
 
                         // For center-aligned text, also check X-center proximity with tighter threshold.
-                        double prevLineCenterY = lastLine.Bounds.Y + (lastLine.Bounds.Width * 0.5);
-                        double currLineCenterY = line.Bounds.Y + (line.Bounds.Width * 0.5);
+                        double prevLineCenterY = lastLine.Bounds.Y + (lastLine.Bounds.Height * 0.5);
+                        double currLineCenterY = line.Bounds.Y + (line.Bounds.Height * 0.5);
                         centerAlignedTextIndent = currLineCenterY - prevLineCenterY;
                     }
                     else
