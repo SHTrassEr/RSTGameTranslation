@@ -105,45 +105,58 @@ namespace RSTGameTranslation
                 // Get current block power for scaling thresholds
                 double blockPower = GetBlockPower();
                 //Console.WriteLine($"Processing with block power: {blockPower:F2}");
-                
+
                 // PHASE 1: Extract character information from JSON
                 var characters = ExtractCharacters(resultsElement);
                 //Console.WriteLine($"Extracted {characters.Count} character objects");
-                
+
+                // Detect vertical (tategaki) text orientation for East Asian languages.
+                // Vertical text is read top-to-bottom within a column, and columns are read
+                // right-to-left. We detect it when the source language is East Asian AND the
+                // majority of character/element boxes are taller than they are wide.
+                bool isVertical = IsVerticalText(characters);
+                if (isVertical)
+                {
+                    Console.WriteLine("Vertical (tategaki) text detected - using right-to-left column ordering");
+                }
+
                 // Get minimum letter confidence threshold
                 double minLetterConfidence = ConfigManager.Instance.GetMinLetterConfidence();
-                
+
                 // Count how many will be filtered due to low confidence
                 int lowConfidenceCount = characters.Count(c => c.Confidence < minLetterConfidence);
-                
+
                 // Remove ALL elements that don't meet the confidence threshold
                 characters.RemoveAll(c => c.Confidence < minLetterConfidence);
-                
+
                 // Now separate the remaining high-confidence elements into character and non-character lists
                 var nonCharacters = characters.Where(c => !c.IsCharacter || c.IsProcessed).ToList();
                 characters = characters.Where(c => c.IsCharacter && !c.IsProcessed).ToList();
-                
+
                 Console.WriteLine($"Filtered out {lowConfidenceCount} elements with confidence < {minLetterConfidence}");
-                
+
                 // PHASE 2: Group characters into words based on proximity
-                var words = GroupCharactersIntoWords(characters, blockPower);
+                var words = GroupCharactersIntoWords(characters, blockPower, isVertical);
                 //Console.WriteLine($"Grouped characters into {words.Count} words");
-                
+
                 // PHASE 3: Group words into lines based on vertical position
-                var lines = GroupWordsIntoLines(words, blockPower);
+                var lines = GroupWordsIntoLines(words, blockPower, isVertical);
                 //Console.WriteLine($"Grouped words into {lines.Count} lines");
-                
+
                 // Filter out low confidence lines
                 double minLineConfidence = ConfigManager.Instance.GetMinLineConfidence();
                 int lowConfidenceLineCount = lines.Count(l => l.Confidence < minLineConfidence);
                 lines = lines.Where(l => l.Confidence >= minLineConfidence).ToList();
                 Console.WriteLine($"Filtered out {lowConfidenceLineCount} lines with confidence < {minLineConfidence}");
-                
+
                 // PHASE 4: Group lines into paragraphs
-                var paragraphs = GroupLinesIntoParagraphs(lines, blockPower);
+                var paragraphs = GroupLinesIntoParagraphs(lines, blockPower, isVertical);
                 //Console.WriteLine($"Grouped lines into {paragraphs.Count} paragraphs");
-                // PHASE 5: Apply manga-specific processing if manga mode is enabled
-                if (ConfigManager.Instance.IsMangaModeEnabled())
+                // PHASE 5: Apply manga-specific processing if manga mode is enabled.
+                // Skip manga processing for vertical (tategaki) text because GroupLinesIntoParagraphs
+                // already orders columns right-to-left correctly, and ProcessMangaSpecificBlocks
+                // re-sorts paragraphs by Y which would break the vertical column order.
+                if (ConfigManager.Instance.IsMangaModeEnabled() && !isVertical)
                 {
                     paragraphs = ProcessMangaSpecificBlocks(paragraphs, blockPower);
                     Console.WriteLine($"After manga processing: {paragraphs.Count} paragraphs");
@@ -245,37 +258,178 @@ namespace RSTGameTranslation
         /// <summary>
         /// Group characters into words based on horizontal proximity
         /// </summary>
-        private List<TextElement> GroupCharactersIntoWords(List<TextElement> characters, double blockPower)
+        /// <summary>
+        /// Detects whether the text is vertical (tategaki) for East Asian languages.
+        /// Returns true when the source language is East Asian (ja/zh/ko) AND the majority
+        /// of element boxes are taller than they are wide.
+        /// </summary>
+        private bool IsVerticalText(List<TextElement> elements)
+        {
+            if (elements == null || elements.Count == 0)
+                return false;
+
+            string sourceLang = ConfigManager.Instance.GetSourceLanguage();
+            bool isEastAsian = sourceLang == "ja" ||
+                               sourceLang == "ch_sim" ||
+                               sourceLang == "ch_tra" ||
+                               sourceLang == "ko";
+            if (!isEastAsian)
+                return false;
+
+            // Use multiple signals to detect vertical (tategaki) text robustly.
+            // Single-signal detection (Height > Width per char) misses often because:
+            //  - Many CJK chars are nearly square (Height ~= Width)
+            //  - Punctuation/small kana can be wider than tall
+            //  - OCR jitter can flip a char's aspect ratio
+            //
+            // Signals:
+            //   1. Median character aspect ratio (Height / Width) — vertical CJK tends to be >= 1.0
+            //   2. Overall bounding region aspect ratio — vertical text regions are usually taller than wide
+            //   3. Count of "tall" chars (Height > Width * 0.9) — tolerant of near-square chars
+            //   4. Columnar layout: chars stack vertically (large Y span) within narrow X bands
+
+            var valid = elements.Where(e => e.Bounds.Width > 0 && e.Bounds.Height > 0).ToList();
+            if (valid.Count == 0)
+                return false;
+
+            // Signal 1: median aspect ratio (Height / Width)
+            var aspectRatios = valid.Select(e => e.Bounds.Height / e.Bounds.Width).OrderBy(r => r).ToList();
+            double medianAspect = aspectRatios[aspectRatios.Count / 2];
+
+            // Signal 2: overall region aspect ratio
+            double minX = valid.Min(e => e.Bounds.X);
+            double maxX = valid.Max(e => e.Bounds.X + e.Bounds.Width);
+            double minY = valid.Min(e => e.Bounds.Y);
+            double maxY = valid.Max(e => e.Bounds.Y + e.Bounds.Height);
+            double regionWidth = maxX - minX;
+            double regionHeight = maxY - minY;
+            double regionAspect = regionWidth > 0 ? regionHeight / regionWidth : 0;
+
+            // Signal 3: count of tall chars (tolerant of near-square)
+            int tallCount = valid.Count(e => e.Bounds.Height > e.Bounds.Width * 0.9);
+            double tallRatio = (double)tallCount / valid.Count;
+
+            // Signal 4: columnar layout — group chars by X proximity and check if columns
+            // are tall (Y span >> X span). This is the strongest layout signal.
+            bool isColumnar = IsColumnarLayout(valid);
+
+            // Decision: vertical if multiple signals agree.
+            // - Strong signal: columnar layout alone is enough (it directly reflects tategaki)
+            // - Otherwise: medianAspect >= 1.0 AND (regionAspect > 0.8 OR tallRatio >= 0.4)
+            if (isColumnar)
+                return true;
+
+            if (medianAspect >= 1.0 && (regionAspect > 0.8 || tallRatio >= 0.4))
+                return true;
+
+            // Japanese specifically uses vertical text very commonly — lower the bar.
+            if (sourceLang == "ja" && medianAspect >= 0.9 && tallRatio >= 0.4)
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Detects whether characters form vertical columns (tategaki layout).
+        /// Groups characters by X proximity and checks if the resulting columns are
+        /// tall (Y span significantly larger than X width). Returns true when the layout
+        /// is columnar rather than row-based.
+        /// </summary>
+        private bool IsColumnarLayout(List<TextElement> elements)
+        {
+            if (elements.Count < 4)
+                return false;
+
+            // Sort by X center
+            var sorted = elements
+                .Select(e => new { Element = e, CenterX = e.Bounds.X + e.Bounds.Width / 2.0 })
+                .OrderBy(x => x.CenterX)
+                .ToList();
+
+            // Group into columns by X proximity. Use median char width as the tolerance.
+            var widths = elements.Select(e => e.Bounds.Width).OrderBy(w => w).ToList();
+            double medianWidth = widths[widths.Count / 2];
+            double columnTolerance = Math.Max(medianWidth * 1.5, 10.0);
+
+            var columns = new List<List<TextElement>>();
+            var currentCol = new List<TextElement> { sorted[0].Element };
+            double currentColCenterX = sorted[0].CenterX;
+
+            for (int i = 1; i < sorted.Count; i++)
+            {
+                if (Math.Abs(sorted[i].CenterX - currentColCenterX) <= columnTolerance)
+                {
+                    currentCol.Add(sorted[i].Element);
+                }
+                else
+                {
+                    columns.Add(currentCol);
+                    currentCol = new List<TextElement> { sorted[i].Element };
+                    currentColCenterX = sorted[i].CenterX;
+                }
+            }
+            columns.Add(currentCol);
+
+            // Filter to columns with at least 2 chars (real columns, not single outliers)
+            var realColumns = columns.Where(c => c.Count >= 2).ToList();
+            if (realColumns.Count == 0)
+                return false;
+
+            // A column is "tall" if its Y span is larger than its X width.
+            int tallColumns = 0;
+            foreach (var col in realColumns)
+            {
+                double colMinX = col.Min(e => e.Bounds.X);
+                double colMaxX = col.Max(e => e.Bounds.X + e.Bounds.Width);
+                double colMinY = col.Min(e => e.Bounds.Y);
+                double colMaxY = col.Max(e => e.Bounds.Y + e.Bounds.Height);
+                double colWidth = colMaxX - colMinX;
+                double colHeight = colMaxY - colMinY;
+
+                if (colHeight > colWidth * 1.5 && colHeight > 0)
+                    tallColumns++;
+            }
+
+            // Vertical layout if majority of real columns are tall.
+            return tallColumns * 2 >= realColumns.Count;
+        }
+
+        private List<TextElement> GroupCharactersIntoWords(List<TextElement> characters, double blockPower, bool isVertical)
         {
             if (characters.Count == 0)
                 return new List<TextElement>();
-                
+
             // Get threshold values with scaling applied
             double horizontalGapThreshold = _config.GetScaledValue(_config.BaseCharacterHorizontalGap, blockPower);
             double verticalGapThreshold = _config.GetScaledValue(_config.BaseCharacterVerticalGap, blockPower);
-            
+
             // Adjust thresholds based on source language
             string sourceLangForChars = ConfigManager.Instance.GetSourceLanguage();
-            bool isEastAsianLangForChars = sourceLangForChars == "ja" || 
-                                          sourceLangForChars == "ch_sim" || 
-                                          sourceLangForChars == "ch_tra" || 
+            bool isEastAsianLangForChars = sourceLangForChars == "ja" ||
+                                          sourceLangForChars == "ch_sim" ||
+                                          sourceLangForChars == "ch_tra" ||
                                           sourceLangForChars == "ko";
-                                      
+
             // For Western languages, use smaller character gap to avoid splitting words
             if (!isEastAsianLangForChars)
             {
                 // For languages like English, we need a smaller gap as letters should be closer together
                 horizontalGapThreshold = Math.Max(5, horizontalGapThreshold * 0.5);
             }
-            
+
             // First, sort characters by vertical position to identify lines
             var charactersWithCenters = characters.Select(c => {
                 c.CenterY = c.Bounds.Y + (c.Bounds.Height / 2);
                 return c;
             }).ToList();
-            
-            // Group characters into lines based on vertical position
-            var sortedChars = charactersWithCenters.OrderBy(c => c.Bounds.Y).ToList();
+
+            // Group characters into lines based on position.
+            //  - Horizontal text: group by vertical proximity (Y) -> horizontal lines.
+            //  - Vertical text: group by horizontal proximity (X) -> vertical columns.
+            //    Within a column, characters are later ordered top-to-bottom by Y.
+            var sortedChars = isVertical
+                ? charactersWithCenters.OrderBy(c => c.Bounds.X).ToList()
+                : charactersWithCenters.OrderBy(c => c.Bounds.Y).ToList();
 
             var lines = new List<List<TextElement>>();
             if (sortedChars.Count > 0)
@@ -286,40 +440,62 @@ namespace RSTGameTranslation
                 for (int i = 1; i < sortedChars.Count; i++)
                 {
                     var currentChar = sortedChars[i];
-                    var lastCharInLine = currentLine.Last(); 
+                    var lastCharInLine = currentLine.Last();
 
-                    double diffY = Math.Abs(currentChar.CenterY - lastCharInLine.CenterY);
-                    
-                    bool isOverlapping = currentChar.Bounds.Y < (lastCharInLine.Bounds.Y + lastCharInLine.Bounds.Height * 0.5);
-
-                    if (diffY < verticalGapThreshold || isOverlapping) 
+                    if (isVertical)
                     {
-                        currentLine.Add(currentChar);
+                        // Vertical text: characters belong to the same column when their X
+                        // centers are close. Use the horizontal gap threshold for grouping.
+                        double diffX = Math.Abs((currentChar.Bounds.X + currentChar.Bounds.Width / 2.0) -
+                                                (lastCharInLine.Bounds.X + lastCharInLine.Bounds.Width / 2.0));
+                        if (diffX < horizontalGapThreshold)
+                        {
+                            currentLine.Add(currentChar);
+                        }
+                        else
+                        {
+                            currentLine = new List<TextElement> { currentChar };
+                            lines.Add(currentLine);
+                        }
                     }
                     else
                     {
-                      
-                        currentLine = new List<TextElement> { currentChar };
-                        lines.Add(currentLine);
+                        double diffY = Math.Abs(currentChar.CenterY - lastCharInLine.CenterY);
+
+                        bool isOverlapping = currentChar.Bounds.Y < (lastCharInLine.Bounds.Y + lastCharInLine.Bounds.Height * 0.5);
+
+                        if (diffY < verticalGapThreshold || isOverlapping)
+                        {
+                            currentLine.Add(currentChar);
+                        }
+                        else
+                        {
+                            currentLine = new List<TextElement> { currentChar };
+                            lines.Add(currentLine);
+                        }
                     }
                 }
             }
-                
+
             // Process each line to form words
             var words = new List<TextElement>();
             int lineIndex = 0;
-            
+
             foreach (var line in lines)
             {
-                // Sort by X position within the line
-                var lineCharacters = line.OrderBy(c => c.Bounds.X).ToList();
+                // Order characters within the line in reading order.
+                //  - Horizontal text: left-to-right (by X).
+                //  - Vertical text: top-to-bottom within a column (by Y).
+                var lineCharacters = isVertical
+                    ? line.OrderBy(c => c.Bounds.Y).ToList()
+                    : line.OrderBy(c => c.Bounds.X).ToList();
                 var lineHeight = lineCharacters.Average(c => c.Bounds.Height);
                 TextElement? currentWord = null;
-                
+
                 foreach (var character in lineCharacters)
                 {
                     character.LineIndex = lineIndex;
-                    
+
                     if (currentWord == null)
                     {
                         // Start a new word with this character
@@ -337,11 +513,15 @@ namespace RSTGameTranslation
                     }
                     else
                     {
-                        // Calculate horizontal gap
-                        double horizontalGap = character.Bounds.X - (currentWord.Bounds.X + currentWord.Bounds.Width);
-                        
+                        // Calculate gap between current character and the current word.
+                        //  - Horizontal text: horizontal gap (X).
+                        //  - Vertical text: vertical gap (Y) between stacked characters.
+                        double gap = isVertical
+                            ? character.Bounds.Y - (currentWord.Bounds.Y + currentWord.Bounds.Height)
+                            : character.Bounds.X - (currentWord.Bounds.X + currentWord.Bounds.Width);
+
                         // Check if this character should be part of the current word
-                        if (horizontalGap <= horizontalGapThreshold)
+                        if (gap <= (isVertical ? verticalGapThreshold : horizontalGapThreshold))
                         {
                             // Add to current word
                             currentWord.Text += character.Text;
@@ -406,7 +586,7 @@ namespace RSTGameTranslation
         /// <summary>
         /// Group words into lines based on vertical position and alignment
         /// </summary>
-        private List<TextElement> GroupWordsIntoLines(List<TextElement> words, double blockPower)
+        private List<TextElement> GroupWordsIntoLines(List<TextElement> words, double blockPower, bool isVertical)
         {
             if (words.Count == 0)
                 return new List<TextElement>();
@@ -442,34 +622,46 @@ namespace RSTGameTranslation
             
             foreach (var lineGroup in lineGroups)
             {
-                // Sort words by X position within the line
-                var lineWords = lineGroup.OrderBy(w => w.Bounds.X).ToList();
+                // Sort words in reading order within the line.
+                //  - Horizontal text: left-to-right (by X).
+                //  - Vertical text: top-to-bottom within a column (by Y).
+                var lineWords = isVertical
+                    ? lineGroup.OrderBy(w => w.Bounds.Y).ToList()
+                    : lineGroup.OrderBy(w => w.Bounds.X).ToList();
                 
                 // Check for large horizontal gaps and split the line if needed
                 List<List<TextElement>> splitLines = new List<List<TextElement>>();
                 List<TextElement> currentSegment = new List<TextElement>();
                 TextElement? previousWord = null;
                 
-                // Split the line if there are large horizontal gaps
+                // Split the line if there are large gaps along the reading axis.
+                //  - Horizontal text: large horizontal (X) gap.
+                //  - Vertical text: large vertical (Y) gap between stacked words.
                 foreach (var word in lineWords)
                 {
                     if (previousWord != null)
                     {
-                        // Calculate the horizontal gap between words
-                        double gap = word.Bounds.X - (previousWord.Bounds.X + previousWord.Bounds.Width);
-                        double averageCharWidth = (word.Bounds.Width / Math.Max(1, word.Text.Length) + 
-                                              previousWord.Bounds.Width / Math.Max(1, previousWord.Text.Length)) / 2.0;
-                        
-                        // Log for debugging
-                        //Console.WriteLine($"Horizontal gap between words: {gap:F1}px, Average char width: {averageCharWidth:F1}px, Threshold: {largeHorizontalGapThreshold:F1}px");
-                        
-                        // Check if the gap exceeds the threshold or is unusually large compared to character width
-                        if (gap > largeHorizontalGapThreshold || gap > (averageCharWidth * 10))
+                        double gap;
+                        double averageCharSize;
+                        if (isVertical)
+                        {
+                            // Vertical: gap along Y between stacked words
+                            gap = word.Bounds.Y - (previousWord.Bounds.Y + previousWord.Bounds.Height);
+                            averageCharSize = (word.Bounds.Height / Math.Max(1, word.Text.Length) +
+                                               previousWord.Bounds.Height / Math.Max(1, previousWord.Text.Length)) / 2.0;
+                        }
+                        else
+                        {
+                            // Horizontal: gap along X between adjacent words
+                            gap = word.Bounds.X - (previousWord.Bounds.X + previousWord.Bounds.Width);
+                            averageCharSize = (word.Bounds.Width / Math.Max(1, word.Text.Length) +
+                                               previousWord.Bounds.Width / Math.Max(1, previousWord.Text.Length)) / 2.0;
+                        }
+
+                        // Check if the gap exceeds the threshold or is unusually large compared to character size
+                        if (gap > largeHorizontalGapThreshold || gap > (averageCharSize * 10))
                         {
                             // Gap is large enough to split the line
-                            //Console.WriteLine($"Large horizontal gap ({gap:F1}px) detected - splitting line");
-                            
-                            // Add the current segment to splitLines if it has words
                             if (currentSegment.Count > 0)
                             {
                                 splitLines.Add(currentSegment);
@@ -477,7 +669,7 @@ namespace RSTGameTranslation
                             }
                         }
                     }
-                    
+
                     // Add the word to the current segment
                     currentSegment.Add(word);
                     previousWord = word;
@@ -553,19 +745,23 @@ namespace RSTGameTranslation
         /// <summary>
         /// Group lines into paragraphs based on spacing, indentation, and font size
         /// </summary>
-        private List<TextElement> GroupLinesIntoParagraphs(List<TextElement> lines, double blockPower)
+        private List<TextElement> GroupLinesIntoParagraphs(List<TextElement> lines, double blockPower, bool isVertical)
         {
             if (lines.Count == 0)
                 return new List<TextElement>();
-                
+
             // Get threshold values with scaling applied
             double lineVerticalGapThreshold = _config.GetScaledValue(_config.BaseLineVerticalGap, blockPower);
             double fontSizeTolerance = _config.GetScaledValue(_config.BaseLineFontSizeTolerance, blockPower);
             double indentationThreshold = _config.GetScaledValue(_config.BaseIndentation, blockPower);
             double paragraphBreakThreshold = _config.GetScaledValue(_config.BaseParagraphBreakThreshold, blockPower);
-            
-            // Sort lines by Y position
-            var sortedLines = lines.OrderBy(l => l.Bounds.Y).ToList();
+
+            // Sort lines in reading order.
+            //  - Horizontal text: top-to-bottom (by Y).
+            //  - Vertical text: columns right-to-left (by X descending).
+            var sortedLines = isVertical
+                ? lines.OrderByDescending(l => l.Bounds.X).ToList()
+                : lines.OrderBy(l => l.Bounds.Y).ToList();
             var paragraphs = new List<TextElement>();
             TextElement? currentParagraph = null;
             
@@ -586,59 +782,83 @@ namespace RSTGameTranslation
                 else
                 {
                     bool startNewParagraph = false;
-                    
+
                     // Get the last line in the paragraph to properly calculate gaps
                     var lastLine = currentParagraph.Children.Last();
-                    
-                    // Calculate vertical distance between line centers instead of using bounding boxes
-                    // This handles overlapping character descenders/ascenders better
-                    double lastLineCenterY = lastLine.Bounds.Y + (lastLine.Bounds.Height * 0.5);
-                    double currentLineCenterY = line.Bounds.Y + (line.Bounds.Height * 0.5);
-                    double centerDistance = currentLineCenterY - lastLineCenterY;
-                    
-                    // Calculate expected line height - use a % of the average height to account for overlapping
-                    double averageHeight = (lastLine.Bounds.Height + line.Bounds.Height) * 0.5;
-                    double normalLineSpacing = averageHeight * 0.63;
-                    
-                    // Calculate adjusted vertical gap that accounts for overlapping text
-                    double verticalGap = centerDistance - normalLineSpacing;
-                    
-                    // Log for debugging
-                    //Console.WriteLine($"Line vertical gap (adjusted): {verticalGap:F1}px, Center distance: {centerDistance:F1}px, Normal spacing: {normalLineSpacing:F1}px, Threshold: {lineVerticalGapThreshold:F1}px");
-                    
+
+                    // Distance between consecutive lines along the reading axis.
+                    //  - Horizontal text: vertical (Y) distance between stacked lines.
+                    //  - Vertical text: horizontal (X) distance between adjacent columns.
+                    double centerDistance;
+                    double averageSize;
+                    double normalSpacing;
+                    double axisGap;
+                    double indent;
+
+                    if (isVertical)
+                    {
+                        // Vertical text: columns are read right-to-left, so the "next" column
+                        // is to the left of the previous one. Use X distance (positive = leftward).
+                        double lastLineCenterX = lastLine.Bounds.X + (lastLine.Bounds.Width * 0.5);
+                        double currentLineCenterX = line.Bounds.X + (line.Bounds.Width * 0.5);
+                        centerDistance = lastLineCenterX - currentLineCenterX; // distance to the left
+
+                        averageSize = (lastLine.Bounds.Width + line.Bounds.Width) * 0.5;
+                        normalSpacing = averageSize * 0.63;
+                        axisGap = centerDistance - normalSpacing;
+
+                        // "Indentation" for vertical text = vertical offset between column tops
+                        indent = line.Bounds.Y - lastLine.Bounds.Y;
+                    }
+                    else
+                    {
+                        // Horizontal text: lines stack top-to-bottom. Use Y distance.
+                        double lastLineCenterY = lastLine.Bounds.Y + (lastLine.Bounds.Height * 0.5);
+                        double currentLineCenterY = line.Bounds.Y + (line.Bounds.Height * 0.5);
+                        centerDistance = currentLineCenterY - lastLineCenterY;
+
+                        averageSize = (lastLine.Bounds.Height + line.Bounds.Height) * 0.5;
+                        normalSpacing = averageSize * 0.63;
+                        axisGap = centerDistance - normalSpacing;
+
+                        // Indentation for horizontal text = horizontal offset between line starts
+                        indent = line.Bounds.X - lastLine.Bounds.X;
+                    }
+
                     // Large center distance indicates paragraph break
-                    if (centerDistance > (averageHeight * 1.5) + paragraphBreakThreshold)
+                    if (centerDistance > (averageSize * 1.5) + paragraphBreakThreshold)
                     {
                         startNewParagraph = true;
                         Console.WriteLine("New paragraph: Large gap detected");
                     }
                     // Moderate gap more than normal line spacing threshold indicates line break
-                    else if (verticalGap > lineVerticalGapThreshold || centerDistance > (averageHeight * 1.2))
+                    else if (axisGap > lineVerticalGapThreshold || centerDistance > (averageSize * 1.2))
                     {
                         startNewParagraph = true;
                         Console.WriteLine("New paragraph: Line spacing exceeded threshold");
                     }
-                    
+
                     // Check indentation - significant indent may indicate new paragraph
-                    // We already have the lastLine from above
-                    double indentation = line.Bounds.X - lastLine.Bounds.X;
-                    
-                    if (Math.Abs(indentation) > indentationThreshold)
+                    if (Math.Abs(indent) > indentationThreshold)
                     {
                         // Significant indentation change suggests new paragraph
                         startNewParagraph = true;
                     }
                     
-                    // Check font size consistency
-                    double fontSizeDiff = Math.Abs(line.Bounds.Height - lastLine.Bounds.Height);
+                    // Check font size consistency.
+                    //  - Horizontal text: font size ~ line Height.
+                    //  - Vertical text: font size ~ column Width.
+                    double lastLineFontSize = isVertical ? lastLine.Bounds.Width : lastLine.Bounds.Height;
+                    double currentLineFontSize = isVertical ? line.Bounds.Width : line.Bounds.Height;
+                    double fontSizeDiff = Math.Abs(currentLineFontSize - lastLineFontSize);
                     if (fontSizeDiff > fontSizeTolerance)
                     {
                         // Different font sizes suggest different paragraphs
                         startNewParagraph = true;
                     }
-                    
+
                     // Font size too small might indicate a caption, header, or other special text
-                    double fontSizeRatio = line.Bounds.Height / lastLine.Bounds.Height;
+                    double fontSizeRatio = currentLineFontSize / Math.Max(1.0, lastLineFontSize);
                     if (fontSizeRatio < 0.7 || fontSizeRatio > 1.3)
                     {
                         startNewParagraph = true;

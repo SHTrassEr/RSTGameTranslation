@@ -3117,6 +3117,88 @@ namespace RSTGameTranslation
         }
 
         /// <summary>
+        /// Returns blocks sorted in natural reading order.
+        /// Detects vertical (tategaki) CJK text and orders columns right-to-left,
+        /// lines top-to-bottom within a column. Otherwise orders top-to-bottom.
+        /// </summary>
+        private List<TempTextBlock> GetBlocksInReadingOrder(List<TempTextBlock> blocks)
+        {
+            if (blocks.Count <= 1)
+                return new List<TempTextBlock>(blocks);
+
+            // Detect vertical text orientation:
+            //  - Source language is East Asian (ja / zh_sim / zh_tra / ko)
+            //  - Majority of blocks are taller than wide (Height > Width)
+            string sourceLang = ConfigManager.Instance.GetSourceLanguage();
+            bool isEastAsian = sourceLang == "ja" ||
+                               sourceLang == "ch_sim" ||
+                               sourceLang == "ch_tra" ||
+                               sourceLang == "ko";
+
+            bool isVertical = false;
+            if (isEastAsian)
+            {
+                int verticalCount = blocks.Count(b => b.Height > b.Width && b.Height > 0);
+                isVertical = verticalCount * 2 >= blocks.Count; // >= 50% of blocks
+            }
+
+            if (!isVertical)
+            {
+                // Horizontal text: top-to-bottom by vertical center.
+                return blocks
+                    .OrderBy(b => b.Y + (b.Height / 2.0))
+                    .ToList();
+            }
+
+            // Vertical text (tategaki): group blocks into columns by horizontal overlap,
+            // order columns right-to-left, and within each column top-to-bottom.
+            // Each block is treated as belonging to one column (typical for vertical CJK OCR).
+            var byY = blocks
+                .OrderBy(b => b.Y + (b.Height / 2.0))
+                .ToList();
+
+            var columns = new List<List<TempTextBlock>>();
+            foreach (var block in byY)
+            {
+                double blockCenterX = block.X + (block.Width / 2.0);
+                double blockLeft = block.X;
+                double blockRight = block.X + block.Width;
+
+                // Find an existing column whose X range overlaps this block.
+                List<TempTextBlock>? targetColumn = null;
+                foreach (var col in columns)
+                {
+                    var rep = col[0];
+                    double repLeft = rep.X;
+                    double repRight = rep.X + rep.Width;
+                    // Overlap test on X axis (with small tolerance)
+                    bool xOverlap = (blockRight + 5.0 >= repLeft) && (blockLeft - 5.0 <= repRight);
+                    if (xOverlap)
+                    {
+                        targetColumn = col;
+                        break;
+                    }
+                }
+
+                if (targetColumn == null)
+                {
+                    targetColumn = new List<TempTextBlock>();
+                    columns.Add(targetColumn);
+                }
+                targetColumn.Add(block);
+            }
+
+            // Order columns right-to-left (descending by max X), within column top-to-bottom.
+            var ordered = new List<TempTextBlock>();
+            foreach (var col in columns.OrderByDescending(c => c.Max(b => b.X + b.Width)))
+            {
+                // Column already sorted by Y above; preserve that order.
+                ordered.AddRange(col);
+            }
+            return ordered;
+        }
+
+        /// <summary>
         /// Merges text blocks that physically overlap with each other
         /// Returns tuple of merged blocks and their original bounding boxes
         /// </summary>
@@ -3134,8 +3216,24 @@ namespace RSTGameTranslation
                 return (blocks, bounds);
             }
 
-            var result = new List<TempTextBlock>(blocks);
-            var boundsResult = blocks.Select(b => new OriginalBounds
+            // Sort blocks to ensure correct reading order before merging.
+            // Two orientation modes are supported:
+            //  - Horizontal text (LTR, top-to-bottom lines): sort by CenterY ascending.
+            //  - Vertical text (Japanese tategaki / vertical CJK): columns are read
+            //    right-to-left, and within a column top-to-bottom.
+            //
+            // Vertical orientation is detected when the source language is East Asian
+            // (ja/zh/ko) AND most blocks are taller than they are wide (Height > Width).
+            // This avoids mis-detecting horizontal CJK dialogue boxes as vertical.
+            //
+            // Using CenterY (instead of Bounds.Y / top) is more robust against OCR jitter
+            // and skewed/curved text where the top edge doesn't reflect the true vertical
+            // position. This fixes the issue where merged multi-line text came out in the
+            // wrong order (e.g. 2-1-3) because the merge order depended on the OCR array order.
+            var sortedBlocks = GetBlocksInReadingOrder(blocks);
+
+            var result = new List<TempTextBlock>(sortedBlocks);
+            var boundsResult = sortedBlocks.Select(b => new OriginalBounds
             {
                 MinX = b.X,
                 MinY = b.Y,
@@ -3218,8 +3316,12 @@ namespace RSTGameTranslation
         /// </summary>
         private TempTextBlock MergeTwoBlocks(TempTextBlock a, TempTextBlock b)
         {
-            // Determine merge order based on Y position
-            if (a.Y > b.Y)
+            // Determine merge order based on vertical center position.
+            // CenterY is more stable than the top edge (Y) for skewed/curved text
+            // and avoids wrong line ordering when OCR bounding boxes overlap vertically.
+            double centerA = a.Y + (a.Height / 2.0);
+            double centerB = b.Y + (b.Height / 2.0);
+            if (centerA > centerB)
             {
                 var temp = a;
                 a = b;
