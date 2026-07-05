@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
@@ -25,15 +26,22 @@ using System.IO;
 namespace RSTGameTranslation
 {
     // Class to represent an ignore phrase
+    public enum IgnorePhraseMatchType
+    {
+        ExactMatch,
+        Contains,
+        RegularExpression
+    }
+
     public class IgnorePhrase
     {
         public string Phrase { get; set; } = string.Empty;
-        public bool ExactMatch { get; set; } = true;
+        public IgnorePhraseMatchType MatchType { get; set; } = IgnorePhraseMatchType.ExactMatch;
 
-        public IgnorePhrase(string phrase, bool exactMatch)
+        public IgnorePhrase(string phrase, IgnorePhraseMatchType matchType)
         {
             Phrase = phrase;
-            ExactMatch = exactMatch;
+            MatchType = matchType;
         }
     }
 
@@ -106,6 +114,13 @@ namespace RSTGameTranslation
 
         // Collection to hold the ignore phrases
         private ObservableCollection<IgnorePhrase> _ignorePhrases = new ObservableCollection<IgnorePhrase>();
+
+        public List<KeyValuePair<string, IgnorePhraseMatchType>> MatchTypeOptions { get; } = new List<KeyValuePair<string, IgnorePhraseMatchType>>
+        {
+            new KeyValuePair<string, IgnorePhraseMatchType>(LocalizationManager.Instance.Strings["Cmb_MatchType_ExactMatch"], IgnorePhraseMatchType.ExactMatch),
+            new KeyValuePair<string, IgnorePhraseMatchType>(LocalizationManager.Instance.Strings["Cmb_MatchType_Contains"], IgnorePhraseMatchType.Contains),
+            new KeyValuePair<string, IgnorePhraseMatchType>(LocalizationManager.Instance.Strings["Cmb_MatchType_RegularExpression"], IgnorePhraseMatchType.RegularExpression),
+        };
 
         private void SettingsWindow_Loaded(object? sender, RoutedEventArgs? e)
         {
@@ -4257,20 +4272,21 @@ namespace RSTGameTranslation
             {
                 _ignorePhrases.Clear();
 
-                // Get phrases from ConfigManager
                 var phrases = ConfigManager.Instance.GetIgnorePhrases();
 
-                // Add each phrase to the collection
-                foreach (var (phrase, exactMatch) in phrases)
+                foreach (var (phrase, matchType) in phrases)
                 {
                     if (!string.IsNullOrEmpty(phrase))
                     {
-                        _ignorePhrases.Add(new IgnorePhrase(phrase, exactMatch));
+                        _ignorePhrases.Add(new IgnorePhrase(phrase, matchType));
                     }
                 }
 
-                // Set the ListView's ItemsSource
                 ignorePhraseListView.ItemsSource = _ignorePhrases;
+                newMatchTypeComboBox.ItemsSource = MatchTypeOptions;
+                newMatchTypeComboBox.SelectedIndex = 0;
+                newMatchTypeComboBox.DisplayMemberPath = "Key";
+                newMatchTypeComboBox.SelectedValuePath = "Value";
 
                 Console.WriteLine($"Loaded {_ignorePhrases.Count} ignore phrases");
             }
@@ -4288,13 +4304,10 @@ namespace RSTGameTranslation
                 if (_isInitializing)
                     return;
 
-                // Convert collection to list of tuples
-                var phrases = _ignorePhrases.Select(p => (p.Phrase, p.ExactMatch)).ToList();
+                var phrases = _ignorePhrases.Select(p => (p.Phrase, p.MatchType)).ToList();
 
-                // Save to ConfigManager
                 ConfigManager.Instance.SaveIgnorePhrases(phrases);
 
-                // Force the Logic to refresh
                 Logic.Instance.ResetHash();
             }
             catch (Exception ex)
@@ -4321,7 +4334,6 @@ namespace RSTGameTranslation
                     return;
                 }
 
-                // Check if the phrase already exists
                 if (_ignorePhrases.Any(p => p.Phrase == phrase))
                 {
                     MessageBox.Show(
@@ -4333,18 +4345,18 @@ namespace RSTGameTranslation
                     return;
                 }
 
-                bool exactMatch = newExactMatchCheckBox.IsChecked ?? true;
+                var matchType = newMatchTypeComboBox.SelectedValue is IgnorePhraseMatchType mt
+                    ? mt
+                    : IgnorePhraseMatchType.ExactMatch;
 
-                // Add to the collection
-                _ignorePhrases.Add(new IgnorePhrase(phrase, exactMatch));
+                _ignorePhrases.Add(new IgnorePhrase(phrase, matchType));
 
-                // Save to ConfigManager
                 SaveIgnorePhrases();
 
-                // Clear the input
                 newIgnorePhraseTextBox.Text = "";
+                newMatchTypeComboBox.SelectedIndex = 0;
 
-                Console.WriteLine($"Added ignore phrase: '{phrase}' (Exact Match: {exactMatch})");
+                Console.WriteLine($"Added ignore phrase: '{phrase}' (Match Type: {matchType})");
             }
             catch (Exception ex)
             {
@@ -4407,28 +4419,28 @@ namespace RSTGameTranslation
         }
 
         // Handle checkbox changed event
-        private void IgnorePhrase_CheckedChanged(object sender, RoutedEventArgs e)
+        private void IgnorePhraseMatchType_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             try
             {
                 if (_isInitializing)
                     return;
 
-                if (sender is System.Windows.Controls.CheckBox checkbox && checkbox.Tag is string phrase)
+                if (sender is System.Windows.Controls.ComboBox comboBox && comboBox.Tag is string phrase)
                 {
-                    bool exactMatch = checkbox.IsChecked ?? false;
+                    var matchType = comboBox.SelectedValue is IgnorePhraseMatchType mt
+                        ? mt
+                        : IgnorePhraseMatchType.ExactMatch;
 
-                    // Find and update the phrase in the collection
                     foreach (var ignorePhrase in _ignorePhrases)
                     {
                         if (ignorePhrase.Phrase == phrase)
                         {
-                            ignorePhrase.ExactMatch = exactMatch;
+                            ignorePhrase.MatchType = matchType;
 
-                            // Save to ConfigManager
                             SaveIgnorePhrases();
 
-                            Console.WriteLine($"Updated ignore phrase: '{phrase}' (Exact Match: {exactMatch})");
+                            Console.WriteLine($"Updated ignore phrase: '{phrase}' (Match Type: {matchType})");
                             break;
                         }
                     }

@@ -1,13 +1,8 @@
-using System;
-using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Globalization;
 using System.Windows;
-using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 
 namespace RSTGameTranslation
@@ -29,6 +24,10 @@ namespace RSTGameTranslation
         public readonly string _supertonicModelFolderPath;
         private readonly Dictionary<string, string> _configValues;
         private string _currentTranslationService = "Gemini"; // Default to Gemini
+
+        private Dictionary<string, Regex> _cachedCompiledRegexes = new Dictionary<string, Regex>();
+        private List<(string Phrase, IgnorePhraseMatchType MatchType)>? _cachedIgnorePhrases;
+        private bool _ignorePhrasesCacheValid;
 
         private const string SHOW_ICON_SIGNAL = "show_icon_signal";
         public const string GEMINI_API_KEYS = "gemini_api_keys";
@@ -2422,12 +2421,12 @@ namespace RSTGameTranslation
 
         public int GetClipboardDebounceMs()
         {
-            string value = GetValue(CLIPBOARD_AUTO_TRANSLATE_DEBOUNCE_MS, "300"); 
+            string value = GetValue(CLIPBOARD_AUTO_TRANSLATE_DEBOUNCE_MS, "300");
             if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out int clipboardDebounce) && clipboardDebounce >= 0 && clipboardDebounce <= 1)
             {
                 return clipboardDebounce;
             }
-            return 300; 
+            return 300;
         }
 
         public void SetClipboardDebounceMs(int value)
@@ -3059,12 +3058,14 @@ namespace RSTGameTranslation
             }
         }
 
-        // Get all ignore phrases as a list of tuples (phrase, exactMatch)
-
-        //OPTIMIZE:  Why is the AI doing all this work over and over?  Should be caching the results
-        public List<(string Phrase, bool ExactMatch)> GetIgnorePhrases()
+        // Get all ignore phrases as a list of tuples (phrase, matchType)
+        public List<(string Phrase, IgnorePhraseMatchType MatchType)> GetIgnorePhrases()
         {
-            List<(string, bool)> result = new List<(string, bool)>();
+            if (_ignorePhrasesCacheValid && _cachedIgnorePhrases != null)
+                return _cachedIgnorePhrases;
+
+            var result = new List<(string, IgnorePhraseMatchType)>();
+            var compiledRegexes = new Dictionary<string, Regex>();
             string value = GetValue(IGNORE_PHRASES, "");
 
             if (!string.IsNullOrEmpty(value))
@@ -3075,7 +3076,6 @@ namespace RSTGameTranslation
                     value = value.Substring((IGNORE_PHRASES + "|").Length);
                 }
 
-                // Format should be: phrase1|True|phrase2|False
                 string[] parts = value.Split('|');
 
                 // Process in pairs
@@ -3084,43 +3084,74 @@ namespace RSTGameTranslation
                     if (i + 1 < parts.Length)
                     {
                         string phrase = parts[i];
-                        bool exactMatch = bool.TryParse(parts[i + 1], out bool match) && match;
+                        string matchTypeStr = parts[i + 1];
+
+                        IgnorePhraseMatchType matchType;
+                        if (bool.TryParse(matchTypeStr, out bool isExact))
+                        {
+                            matchType = isExact ? IgnorePhraseMatchType.ExactMatch : IgnorePhraseMatchType.Contains;
+                        }
+                        else if (!Enum.TryParse(matchTypeStr, out matchType))
+                        {
+                            matchType = IgnorePhraseMatchType.ExactMatch;
+                        }
 
                         if (!string.IsNullOrEmpty(phrase))
                         {
-                            result.Add((phrase, exactMatch));
-                            //Console.WriteLine($"Loaded ignore phrase: '{phrase}' (Exact Match: {exactMatch})");
+                            result.Add((phrase, matchType));
+
+                            if (matchType == IgnorePhraseMatchType.RegularExpression)
+                            {
+                                try
+                                {
+                                    compiledRegexes[phrase] = new Regex(phrase, RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(200));
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Failed to compile regex '{phrase}': {ex.Message}");
+                                }
+                            }
                         }
                     }
                 }
             }
 
+            _cachedCompiledRegexes = compiledRegexes;
+            _cachedIgnorePhrases = result;
+            _ignorePhrasesCacheValid = true;
+
             return result;
         }
 
+        public bool TryGetCompiledRegex(string phrase, out Regex? regex)
+        {
+            return _cachedCompiledRegexes.TryGetValue(phrase, out regex);
+        }
+
         // Save all ignore phrases
-        public void SaveIgnorePhrases(List<(string Phrase, bool ExactMatch)> phrases)
+        public void SaveIgnorePhrases(List<(string Phrase, IgnorePhraseMatchType MatchType)> phrases)
         {
             StringBuilder sb = new StringBuilder();
 
-            foreach (var (phrase, exactMatch) in phrases)
+            foreach (var (phrase, matchType) in phrases)
             {
                 if (!string.IsNullOrEmpty(phrase))
                 {
                     sb.Append(phrase);
                     sb.Append('|');
-                    sb.Append(exactMatch.ToString());
+                    sb.Append(matchType.ToString());
                     sb.Append('|');
                 }
             }
 
             _configValues[IGNORE_PHRASES] = sb.ToString();
+            _ignorePhrasesCacheValid = false;
             SaveConfig();
             Console.WriteLine($"Saved {phrases.Count} ignore phrases: {sb.ToString()}");
         }
 
         // Add a single ignore phrase
-        public void AddIgnorePhrase(string phrase, bool exactMatch)
+        public void AddIgnorePhrase(string phrase, IgnorePhraseMatchType matchType)
         {
             if (string.IsNullOrEmpty(phrase))
                 return;
@@ -3130,9 +3161,9 @@ namespace RSTGameTranslation
             // Check if the phrase already exists
             if (!phrases.Any(p => p.Phrase == phrase))
             {
-                phrases.Add((phrase, exactMatch));
+                phrases.Add((phrase, matchType));
                 SaveIgnorePhrases(phrases);
-                Console.WriteLine($"Added ignore phrase: '{phrase}' (Exact Match: {exactMatch})");
+                Console.WriteLine($"Added ignore phrase: '{phrase}' (Match Type: {matchType})");
             }
         }
 
@@ -3186,8 +3217,7 @@ namespace RSTGameTranslation
             SaveConfig();
         }
 
-        // Update exact match setting for a phrase
-        public void UpdateIgnorePhraseExactMatch(string phrase, bool exactMatch)
+        public void UpdateIgnorePhraseMatchType(string phrase, IgnorePhraseMatchType matchType)
         {
             if (string.IsNullOrEmpty(phrase))
                 return;
@@ -3198,9 +3228,9 @@ namespace RSTGameTranslation
             {
                 if (phrases[i].Phrase == phrase)
                 {
-                    phrases[i] = (phrase, exactMatch);
+                    phrases[i] = (phrase, matchType);
                     SaveIgnorePhrases(phrases);
-                    Console.WriteLine($"Updated ignore phrase: '{phrase}' (Exact Match: {exactMatch})");
+                    Console.WriteLine($"Updated ignore phrase: '{phrase}' (Match Type: {matchType})");
                     break;
                 }
             }
@@ -3373,7 +3403,7 @@ namespace RSTGameTranslation
                                 int screenIndex = 0;
                                 double dpiScaleX = 1.0;
                                 double dpiScaleY = 1.0;
-                                
+
                                 // Parse new fields if available
                                 if (parts.Length >= 7)
                                 {
@@ -3381,7 +3411,7 @@ namespace RSTGameTranslation
                                     double.TryParse(parts[5], NumberStyles.Any, CultureInfo.InvariantCulture, out dpiScaleX);
                                     double.TryParse(parts[6], NumberStyles.Any, CultureInfo.InvariantCulture, out dpiScaleY);
                                 }
-                                
+
                                 areas.Add(new TranslationAreaInfo(new Rect(x, y, width, height), screenIndex, dpiScaleX, dpiScaleY));
                             }
                         }
