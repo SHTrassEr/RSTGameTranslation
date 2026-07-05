@@ -90,13 +90,17 @@ namespace RSTGameTranslation
 
         // Semaphore to ensure only one speech request is processed at a time
         private static readonly SemaphoreSlim _speechSemaphore = new SemaphoreSlim(1, 1);
-        
+
         // Thread-safe queue for speech requests
         private static readonly ConcurrentQueue<string> _speechQueue = new ConcurrentQueue<string>();
-        
+
         // Flag to track if we're currently processing speech
         private static bool _isProcessingSpeech = false;
-        
+
+        // Lock to make EnqueueSpeechRequest's check-and-start atomic, preventing
+        // two concurrent enqueues from both starting a ProcessSpeechQueueAsync task.
+        private static readonly object _speechStartLock = new object();
+
         // Cancellation token source for speech processing
         private static CancellationTokenSource? _speechCancellationTokenSource;
 
@@ -296,17 +300,29 @@ namespace RSTGameTranslation
                     Console.WriteLine($"Processing {queueSize} speech requests as one batch");
                     
                     // Dequeue all items and combine them
+                    string? lastAppended = null;
                     while (_speechQueue.TryDequeue(out string? textToSpeak) && !cancellationToken.IsCancellationRequested)
                     {
                         if (!string.IsNullOrWhiteSpace(textToSpeak))
                         {
+                            // Deduplicate: skip if identical to the last item we appended.
+                            // This prevents the same translation (enqueued twice by a bug or
+                            // race) from being spoken twice in a row.
+                            if (lastAppended != null &&
+                                string.Equals(lastAppended, textToSpeak, StringComparison.Ordinal))
+                            {
+                                Console.WriteLine($"Skipping duplicate speech item: {textToSpeak.Substring(0, Math.Min(50, textToSpeak.Length))}...");
+                                continue;
+                            }
+
                             // Add a space between items if needed
                             if (combinedText.Length > 0)
                             {
                                 combinedText.Append(" ");
                             }
-                            
+
                             combinedText.Append(textToSpeak);
+                            lastAppended = textToSpeak;
                         }
                     }
                     
@@ -347,39 +363,36 @@ namespace RSTGameTranslation
             {
                 // Process the text to remove line breaks and normalize spaces
                 string processedText = ProcessTextForSpeech(text);
-                
+
                 // Add the processed text to the queue
                 _speechQueue.Enqueue(processedText);
                 Console.WriteLine($"Speech request enqueued. Queue size: {_speechQueue.Count}");
 
-                // Start processing if not already doing so
-                if (!_isProcessingSpeech)
+                // Atomically check whether a processor task needs to be started.
+                // Without this lock, two concurrent enqueues could both observe
+                // _isProcessingSpeech == false and both start a processing task,
+                // which (combined with the non-atomic flag) could lead to the
+                // same text being spoken twice.
+                lock (_speechStartLock)
                 {
-                    if (_speechCancellationTokenSource != null)
+                    if (!_isProcessingSpeech)
                     {
-                        _speechCancellationTokenSource.Cancel();
-                        _speechCancellationTokenSource.Dispose();
-                    }
-                    
-                    // Create a new cancellation token source
-                    _speechCancellationTokenSource = new CancellationTokenSource();
-                    
-                    // Start the processing task
-                    Task.Run(() => ProcessSpeechQueueAsync(_speechCancellationTokenSource.Token));
-                }
-                else
-                {
+                        if (_speechCancellationTokenSource != null)
+                        {
+                            _speechCancellationTokenSource.Cancel();
+                            _speechCancellationTokenSource.Dispose();
+                        }
 
-                    bool interruptCurrentSpeech = false;
-                    if (interruptCurrentSpeech && _speechCancellationTokenSource != null)
-                    {
-                        _speechCancellationTokenSource.Cancel();
-                        _speechCancellationTokenSource.Dispose();
+                        // Create a new cancellation token source
                         _speechCancellationTokenSource = new CancellationTokenSource();
-                        
-                        _isProcessingSpeech = false;
-                        
+
+                        // Start the processing task
                         Task.Run(() => ProcessSpeechQueueAsync(_speechCancellationTokenSource.Token));
+                    }
+                    else
+                    {
+                        // Already processing — the queued item will be picked up by the
+                        // running processor's loop. No need to start a new task.
                     }
                 }
             }

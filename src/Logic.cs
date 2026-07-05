@@ -709,14 +709,13 @@ namespace RSTGameTranslation
                                         }
                                         else
                                         {
-                                            // Only add to chat history if translation is disabled
+                                            // Only add to chat history if translation is disabled.
+                                            // Note: AddTranslationToHistory already calls
+                                            // ChatBoxWindow.OnTranslationWasAdded internally, so we must NOT
+                                            // call it again here — doing so would enqueue the TTS request
+                                            // twice and cause the text to be spoken twice.
                                             _lastChangeTime = DateTime.MinValue;
                                             MainWindow.Instance.AddTranslationToHistory(combinedText, combinedText);
-
-                                            if (ChatBoxWindow.Instance != null)
-                                            {
-                                                ChatBoxWindow.Instance.OnTranslationWasAdded(combinedText, combinedText);
-                                            }
                                         }
                                     }
 
