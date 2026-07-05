@@ -57,6 +57,7 @@
   "Lbl_MinTextFragmentSize": "Đoạn văn bản nhỏ nhất:",
   "Lbl_MinLetterConfidence": "Độ tin cậy ký tự tối thiểu:",
   "Lbl_MinLineConfidence": "Độ tin cậy dòng tối thiểu:",
+  "Lbl_LineSpacingFactor": "Hệ số giãn dòng:",
   "Lbl_MultiSelection": "Chọn nhiều vùng",
   "Lbl_LeaveOnscreen": "Giữ bản dịch trên màn hình:",
   "Lbl_AutoTranslate": "Tự động dịch:",

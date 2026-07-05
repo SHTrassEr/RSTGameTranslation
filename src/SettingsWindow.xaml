@@ -676,6 +676,7 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 
                                 <!-- Block Power -->
@@ -741,9 +742,16 @@
                                 <CheckBox x:Name="autoTranslateCheckBox" Grid.Row="7" Grid.Column="1"
                                          Margin="0,5" IsChecked="True"
                                          Checked="AutoTranslateCheckBox_CheckedChanged"
-                                         Unchecked="AutoTranslateCheckBox_CheckedChanged"/>
+                                          Unchecked="AutoTranslateCheckBox_CheckedChanged"/>
                                          
-                                
+                                <!-- Line Spacing Factor -->
+                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Lbl_LineSpacingFactor]}" Grid.Row="8" Grid.Column="0" 
+                                          VerticalAlignment="Center" Margin="0,0,10,0"
+                                          ToolTip="Factor for normal line spacing. Default 0.63. Larger = lines merge more easily."/>
+                                <TextBox x:Name="lineSpacingFactorTextBox" Grid.Row="8" Grid.Column="1" 
+                                        Margin="0,5" Text="0.63" LostFocus="LineSpacingFactorTextBox_LostFocus"
+                                        ToolTip="Factor for normal line spacing. Default 0.63. Larger = lines merge more easily."/>
+
                                 <!-- Multi Selection Area -->
                                 <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Lbl_MultiSelection]}" Grid.Row="9" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0"
                                     ToolTip="Enable multi selection area for text selection."/>
