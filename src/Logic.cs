@@ -1,17 +1,16 @@
+using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Application = System.Windows.Application;
 using Color = System.Windows.Media.Color;
-using MessageBox = System.Windows.MessageBox;
-using System.Diagnostics;
-using System.Collections.Generic;
 using FlowDirection = System.Windows.FlowDirection;
+using MessageBox = System.Windows.MessageBox;
 
 namespace RSTGameTranslation
 {
@@ -30,7 +29,7 @@ namespace RSTGameTranslation
         private readonly List<string> _audioBatch = new List<string>();
         private readonly object _audioBatchLock = new object();
         private System.Threading.Timer? _audioBatchTimer;
-        private const int AudioBatchDelayMs = 500; 
+        private const int AudioBatchDelayMs = 500;
         private bool _isProcessingAudioBatch = false;
         private bool _hasNewAudioSinceLastTranslation = false;
 
@@ -1182,32 +1181,37 @@ namespace RSTGameTranslation
 
             string filteredText = text;
 
-            //Console.WriteLine($"Checking text '{text}' against {ignorePhrases.Count} ignore phrases");
-
-            foreach (var (phrase, exactMatch) in ignorePhrases)
+            foreach (var (phrase, matchType) in ignorePhrases)
             {
                 if (string.IsNullOrEmpty(phrase))
                     continue;
 
-                if (exactMatch)
+                switch (matchType)
                 {
-                    // Check for exact match
-                    if (text.Equals(phrase, StringComparison.OrdinalIgnoreCase))
-                    {
-                        //Console.WriteLine($"Ignoring text due to exact match: '{phrase}'");
-                        return (true, string.Empty);
-                    }
-                }
-                else
-                {
-                    // Remove the phrase from the text
-                    string before = filteredText;
-                    filteredText = filteredText.Replace(phrase, "", StringComparison.OrdinalIgnoreCase);
+                    case IgnorePhraseMatchType.ExactMatch:
+                        if (text.Equals(phrase, StringComparison.OrdinalIgnoreCase))
+                            return (true, string.Empty);
+                        break;
 
-                    if (before != filteredText)
-                    {
-                        //Console.WriteLine($"Applied non-exact match filter: '{phrase}' removed from text");
-                    }
+                    case IgnorePhraseMatchType.Contains:
+                        string before = filteredText;
+                        filteredText = filteredText.Replace(phrase, "", StringComparison.OrdinalIgnoreCase);
+                        break;
+
+                    case IgnorePhraseMatchType.RegularExpression:
+                        if (ConfigManager.Instance.TryGetCompiledRegex(phrase, out var regex) && regex != null)
+                        {
+                            try
+                            {
+                                if (regex.IsMatch(text))
+                                    return (true, string.Empty);
+                            }
+                            catch (RegexMatchTimeoutException)
+                            {
+                                Console.WriteLine($"Regex timed out for phrase '{phrase}' on text '{text}'");
+                            }
+                        }
+                        break;
                 }
             }
 
@@ -1275,7 +1279,7 @@ namespace RSTGameTranslation
 
                     // If auto merge is enabled, collect all text blocks first
                     List<TempTextBlock> tempBlocks = new List<TempTextBlock>();
-                    
+
                     for (int i = 0; i < resultCount; i++)
                     {
                         JsonElement item = resultsElement[i];
@@ -1802,20 +1806,20 @@ namespace RSTGameTranslation
         private bool IsDuplicateAudio(string newText, List<string> recentTexts, int checkLastN = 3)
         {
             if (recentTexts.Count == 0) return false;
-            
+
             string normalizedNew = NormalizeTextForComparison(newText);
-            
+
             int checkCount = Math.Min(checkLastN, recentTexts.Count);
             for (int i = recentTexts.Count - checkCount; i < recentTexts.Count; i++)
             {
                 string normalizedExisting = NormalizeTextForComparison(recentTexts[i]);
-                
+
                 if (normalizedNew == normalizedExisting)
                 {
                     Console.WriteLine($"[DUPLICATE] Exact match: '{newText}'");
                     return true;
                 }
-                
+
                 double similarity = CalculateTextSimilarity(normalizedNew, normalizedExisting);
                 if (similarity > 0.9)
                 {
@@ -1823,17 +1827,17 @@ namespace RSTGameTranslation
                     return true;
                 }
             }
-            
+
             return false;
         }
 
         private string NormalizeTextForComparison(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
-            
+
             return System.Text.RegularExpressions.Regex.Replace(
-                text.ToLower().Trim(), 
-                @"\s+", 
+                text.ToLower().Trim(),
+                @"\s+",
                 " "
             );
         }
@@ -1842,23 +1846,23 @@ namespace RSTGameTranslation
         {
             if (s1 == s2) return 1.0;
             if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2)) return 0.0;
-            
+
             // Levenshtein distance
             int maxLen = Math.Max(s1.Length, s2.Length);
             int distance = LevenshteinDistance(s1, s2);
-            
+
             return 1.0 - ((double)distance / maxLen);
         }
 
         private int LevenshteinDistance(string s1, string s2)
         {
             int[,] d = new int[s1.Length + 1, s2.Length + 1];
-            
+
             for (int i = 0; i <= s1.Length; i++)
                 d[i, 0] = i;
             for (int j = 0; j <= s2.Length; j++)
                 d[0, j] = j;
-            
+
             for (int i = 1; i <= s1.Length; i++)
             {
                 for (int j = 1; j <= s2.Length; j++)
@@ -1870,23 +1874,23 @@ namespace RSTGameTranslation
                     );
                 }
             }
-            
+
             return d[s1.Length, s2.Length];
         }
 
         public void AddAudioTextObject(string audioText)
         {
             if (string.IsNullOrEmpty(audioText)) return;
-            
+
             lock (_audioBatchLock)
             {
-              
+
                 if (IsDuplicateAudio(audioText, _audioBatch, checkLastN: 3))
                 {
                     Console.WriteLine($"[SKIP] Duplicate audio detected, ignoring: '{audioText}'");
                     return;
                 }
-                
+
 
                 _audioBatch.Add(audioText);
                 Console.WriteLine($"Added audio to batch: '{audioText}'. Batch size: {_audioBatch.Count}");
@@ -1897,9 +1901,9 @@ namespace RSTGameTranslation
                     Console.WriteLine("[FORCE] Batch size reached 10, processing immediately");
                     _audioBatchTimer?.Dispose();
                     ProcessAudioBatchCallback(null);
-                    return; 
+                    return;
                 }
-                
+
                 _audioBatchTimer?.Dispose();
                 _audioBatchTimer = new System.Threading.Timer(
                     ProcessAudioBatchCallback,
@@ -1921,37 +1925,37 @@ namespace RSTGameTranslation
         private async Task ProcessAudioBatchAsync()
         {
             List<string> batchToProcess;
-            
+
             lock (_audioBatchLock)
             {
                 if (!_hasNewAudioSinceLastTranslation)
                 {
                     Console.WriteLine("[SKIP] No new audio since last translation, ignoring timer trigger");
-                    return; 
+                    return;
                 }
-                
+
                 if (_isProcessingAudioBatch || _audioBatch.Count == 0)
                 {
                     return;
                 }
-                
+
                 _isProcessingAudioBatch = true;
-                
+
                 batchToProcess = new List<string>(_audioBatch);
                 _audioBatch.Clear();
                 _hasNewAudioSinceLastTranslation = false;
-                
+
                 Console.WriteLine($"Processing audio batch with {batchToProcess.Count} items");
             }
-            
+
             try
             {
                 _textObjects.Clear();
-                
+
                 string combinedAudio = string.Join(" ", batchToProcess);
-                
+
                 Console.WriteLine($"Combined audio text: '{combinedAudio}'");
-                
+
                 var audioTextObject = new TextObject(
                     text: combinedAudio,
                     x: 100,
@@ -1963,9 +1967,9 @@ namespace RSTGameTranslation
                     captureX: 0,
                     captureY: 0
                 );
-                
+
                 _textObjects.Add(audioTextObject);
-                
+
                 await TranslateTextObjectsAsync();
             }
             catch (Exception ex)
@@ -2183,7 +2187,7 @@ namespace RSTGameTranslation
                 // Cleanup audio batch timer
                 _audioBatchTimer?.Dispose();
                 _audioBatchTimer = null;
-                
+
                 // Clean up resources
                 Console.WriteLine("Logic finalized");
 
@@ -2872,7 +2876,7 @@ namespace RSTGameTranslation
 
                 // Parse the translated text from response
                 string? translatedText = ExtractTranslatedTextFromResponse(translationResponse);
-                
+
                 return translatedText;
             }
             catch (Exception ex)
@@ -2894,7 +2898,7 @@ namespace RSTGameTranslation
             try
             {
                 currentService ??= ConfigManager.Instance.GetCurrentTranslationService();
-                
+
                 using JsonDocument doc = JsonDocument.Parse(response);
                 var root = doc.RootElement;
 
@@ -3056,7 +3060,7 @@ namespace RSTGameTranslation
             try
             {
                 var (content, isGoogleTranslate) = ExtractInnerContentFromResponse(response);
-                
+
                 if (string.IsNullOrEmpty(content))
                 {
                     Console.WriteLine("[ClipboardTranslate] Could not extract content from response");
